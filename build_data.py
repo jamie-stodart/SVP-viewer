@@ -1,0 +1,49 @@
+"""Subset WOA23 monthly T/S for northern Australia into small Int16 files.
+
+Run from the repo root:  python scripts/build_data.py
+Needs: pip install numpy xarray netCDF4
+Output: data/meta.json and data/m01.bin ... data/m12.bin
+
+Reads NOAA's OPeNDAP endpoint, so only the requested region is transferred
+(a few MB per file) instead of the full global NetCDFs.
+
+Per-month layout (Int16, little-endian):
+  [temperature block][salinity block], each ordered [lat][lon][depth]
+  temperature = value * 100 (degC), salinity = value * 1000 (PSU), -32768 = no data
+"""
+import json, pathlib
+import numpy as np
+import xarray as xr
+
+LAT = (-25, -5)       # south, north
+LON = (105, 160)      # west, east
+MAX_DEPTH = 1000      # m
+STEP = 2              # 2 = every 2nd cell of the 0.25 deg grid (0.5 deg). Use 1 for full res (~4x bigger)
+URL = ("https://www.ncei.noaa.gov/thredds-ocean/dodsC/woa23/DATA/"
+       "{v}/netcdf/decav/0.25/woa23_decav_{k}{m:02d}_04.nc")
+
+out = pathlib.Path("data")
+out.mkdir(exist_ok=True)
+
+def fetch(v, k, m):
+    url = URL.format(v=v, k=k, m=m)
+    print("reading", url)
+    ds = xr.open_dataset(url, decode_times=False)
+    da = ds[f"{k}_an"].squeeze("time", drop=True)
+    da = da.sel(lat=slice(*LAT), lon=slice(*LON), depth=slice(0, MAX_DEPTH))
+    return da.isel(lat=slice(None, None, STEP), lon=slice(None, None, STEP)).transpose("lat", "lon", "depth").load()
+
+def pack(da, scale):
+    a = np.round(da.values * scale)
+    a[np.isnan(da.values)] = -32768
+    return a.astype("<i2")
+
+for m in range(1, 13):
+    t, s = fetch("temperature", "t", m), fetch("salinity", "s", m)
+    (out / f"m{m:02d}.bin").write_bytes(pack(t, 100).tobytes() + pack(s, 1000).tobytes())
+    if m == 1:
+        meta = dict(lon0=float(t.lon[0]), lat0=float(t.lat[0]), res=float(t.lon[1] - t.lon[0]),
+                    nx=t.sizes["lon"], ny=t.sizes["lat"], depths=[float(d) for d in t.depth])
+        (out / "meta.json").write_text(json.dumps(meta))
+        print("grid", meta["nx"], "x", meta["ny"], "x", len(meta["depths"]), "levels")
+print("done")
