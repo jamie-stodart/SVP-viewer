@@ -1,6 +1,8 @@
 """Subset WOA23 monthly T/S for northern Australia into small Int16 files.
 
-Run from the repo root:  python scripts/build_data.py
+Run from the repo root:  python scripts/build_data.py [all|recent]
+  all    = 1955-2022 average (decav)  -> data/
+  recent = 2015-2022 decade (B5C2)    -> data/recent/
 Needs: pip install numpy xarray netCDF4
 Output: data/meta.json and data/m01.bin ... data/m12.bin
 
@@ -11,7 +13,7 @@ Per-month layout (Int16, little-endian):
   [temperature block][salinity block], each ordered [lat][lon][depth]
   temperature = value * 100 (degC), salinity = value * 1000 (PSU), -32768 = no data
 """
-import json, pathlib
+import json, pathlib, sys
 import numpy as np
 import xarray as xr
 
@@ -20,13 +22,15 @@ LON = (105, 160)      # west, east
 MAX_DEPTH = 1000      # m
 STEP = 2              # 2 = every 2nd cell of the 0.25 deg grid (0.5 deg). Use 1 for full res (~4x bigger)
 URL = ("https://www.ncei.noaa.gov/thredds-ocean/dodsC/woa23/DATA/"
-       "{v}/netcdf/decav/0.25/woa23_decav_{k}{m:02d}_04.nc")
+       "{v}/netcdf/{p}/0.25/woa23_{p}_{k}{m:02d}_04.nc")
+SETS = {"all": ("decav", "data"), "recent": ("B5C2", "data/recent")}
+PERIOD, OUTDIR = SETS[sys.argv[1] if len(sys.argv) > 1 else "all"]
 
-out = pathlib.Path("data")
-out.mkdir(exist_ok=True)
+out = pathlib.Path(OUTDIR)
+out.mkdir(parents=True, exist_ok=True)
 
 def fetch(v, k, m):
-    url = URL.format(v=v, k=k, m=m)
+    url = URL.format(v=v, k=k, m=m, p=PERIOD)
     print("reading", url)
     ds = xr.open_dataset(url, decode_times=False)
     da = ds[f"{k}_an"].squeeze("time", drop=True)
