@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Northern Australia Sound Velocity Profile Viewer</title>
+ 
+<link rel="stylesheet"let/dist/leaflet.css
+ 
+<script src="https://unpkg.com/leaflet.jsscript>
+<script/cdn.jsdelivr.net/npm/chart.jsscript>
+ 
+<style>
+body {
+margin: 0;
+font-family: Arial, sans-serif;
+background: #0c1b2a;
+color: white;
+}
+ 
+h1 {
+margin: 10px;
+text-align: center;
+}
+ 
+#container {
+display: flex;
+height: calc(100vh - 60px);
+}
+ 
+#map {
+width: 60%;
+height: 100%;
+}
+ 
+#sidebar {
+width: 40%;
+padding: 20px;
+box-sizing: border-box;
+background: #13283d;
+}
+ 
+.info {
+margin-bottom: 20px;
+}
+ 
+select {
+padding: 6px;
+font-size: 14px;
+}
+ 
+canvas {
+background: white;
+border-radius: 8px;
+padding: 10px;
+}
+</style>
+</head>
+ 
+<body>
+ 
+<h1>Sound Velocity Profile Viewer</h1>
+ 
+<div id="container">
+ 
+<div id="map"></div>
+ 
+<div id="sidebar">
+ 
+<div class="info">
+<strong>Latitude:</strong>
+<span id="lat">-</span><br>
+ 
+<strong>Longitude:</strong>
+<span id="lon">-</span>
+</div>
+ 
+<div class="info">
+ 
+<label><strong>Month</strong></label><br><br>
+ 
+<select id="month">
+<option value="1">January</option>
+<option value="2">February</option>
+<option value="3">March</option>
+<option value="4">April</option>
+<option value="5">May</option>
+<option value="6">June</option>
+<option value="7">July</option>
+<option value="8">August</option>
+<option value="9">September</option>
+<option value="10" selected>October</option>
+<option value="11">November</option>
+<option value="12">December</option>
+</select>
+ 
+</div>
+ 
+<div class="info">
+<strong>Surface Sound Speed:</strong>
+<span id="surfaceSpeed">-</span> m/s
+</div>
+ 
+<canvas id="svpChart"></canvas>
+ 
+</div>
+ 
+</div>
+ 
+<script>
+ 
+// ---------- MAP ----------
+ 
+const map = L.map('map').setView([-12, 130], 5);
+ 
+L.tileLayer(
+'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+{
+attribution: '&copy; OpenStreetMap contributors'
+}
+).addTo(map);
+ 
+let marker;
+ 
+// ---------- CHART ----------
+ 
+const ctx = document.getElementById('svpChart');
+ 
+const chart = new Chart(ctx, {
+type: 'line',
+data: {
+labels: [],
+datasets: [{
+label: 'Sound Speed (m/s)',
+data: [],
+borderWidth: 3,
+borderColor: '#0077ff',
+pointRadius: 3,
+tension: 0.2
+}]
+},
+options: {
+responsive: true,
+plugins: {
+legend: {
+display: true
+}
+},
+scales: {
+ 
+x: {
+title: {
+display: true,
+text: 'Sound Speed (m/s)'
+}
+},
+ 
+y: {
+reverse: true,
+title: {
+display: true,
+text: 'Depth (m)'
+}
+}
+}
+}
+});
+ 
+ 
+// ---------- SIMULATED SVP ----------
+ 
+function generateSVP(lat, lon, month){
+ 
+const depths = [
+0,10,20,30,50,75,100,150,200
+];
+ 
+const profile = [];
+ 
+const seasonalEffect =
+Math.cos((month - 1) / 12 * Math.PI * 2);
+ 
+const baseSurface =
+1535 +
+(seasonalEffect * 4) +
+((Math.abs(lat) / 20) * 3);
+ 
+depths.forEach(depth => {
+ 
+const speed =
+baseSurface
+- (depth * 0.03)
++ Math.sin(depth / 30) * 1.5;
+ 
+profile.push(
+Math.round(speed * 10) / 10
+);
+});
+ 
+return {
+depths,
+profile
+};
+}
+ 
+let lastLat = null;
+let lastLon = null;
+ 
+function updateProfile(lat, lon){
+ 
+const month =
+parseInt(
+document.getElementById('month').value
+);
+ 
+const result =
+generateSVP(lat, lon, month);
+ 
+chart.data.labels =
+result.depths;
+ 
+chart.data.datasets[0].data =
+result.profile;
+ 
+chart.update();
+ 
+document.getElementById('surfaceSpeed').innerText =
+result.profile[0];
+ 
+document.getElementById('lat').innerText =
+lat.toFixed(4);
+ 
+document.getElementById('lon').innerText =
+lon.toFixed(4);
+ 
+lastLat = lat;
+lastLon = lon;
+}
+ 
+// ---------- CLICK EVENT ----------
+ 
+map.on('click', function(e){
+ 
+const lat = e.latlng.lat;
+const lon = e.latlng.lng;
+ 
+if(marker){
+map.removeLayer(marker);
+}
+ 
+marker = L.marker([lat, lon]).addTo(map);
+ 
+updateProfile(lat, lon);
+});
+ 
+// ---------- MONTH CHANGE ----------
+ 
+document
+.getElementById('month')
+.addEventListener('change', () => {
+ 
+if(lastLat !== null){
+updateProfile(lastLat, lastLon);
+}
+ 
+});
+ 
+// ---------- DEFAULT ----------
+ 
+updateProfile(
+-12.4,
+130.9
+);
+ 
+marker = L.marker(
+[-12.4,130.9]
+).addTo(map);
+ 
+</script>
+ 
+</body>
+</html>
