@@ -35,7 +35,6 @@ table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:ta
   <label>Month <select id="month"></select></label>
   <label>Data period <select id="set"><option value="all">1955–2022 average</option><option value="recent">2015–2022 (more recent)</option></select></label>
   <label>Measured water temp (°C). The whole profile shifts to match it. <input id="meas" type="number" step="0.1" placeholder="e.g. 29.5"></label>
-  <label>Sonar goal <select id="goal"><option value="axis">Long range (sound channel axis)</option><option value="duct">Inside the surface duct</option><option value="below">Below the mixed layer</option></select></label>
   <canvas id="plot" role="img" aria-label="Sound speed against depth"></canvas>
   <dl>
     <dt>Surface sound speed</dt><dd id="r1">–</dd>
@@ -44,13 +43,11 @@ table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:ta
     <dt>Data surface T, S (raw)</dt><dd id="r4">–</dd>
     <dt>Grid cell centre</dt><dd id="r5">–</dd>
     <dt>Adjustment from measured temp</dt><dd id="r6">–</dd>
-    <dt>Surface duct (layer depth)</dt><dd id="r7">–</dd>
-    <dt>Suggested sonar depth</dt><dd id="r8">–</dd>
+    <dt>Surface duct</dt><dd id="r7">–</dd>
   </dl>
-  <p class="note" id="why"></p>
   <details><summary>Data values at this point</summary><table id="tbl"></table></details>
   <button id="csv">Download CSV</button>
-  <p class="note">Monthly climatology: no tides, internal waves or river plumes. Unreliable near the coast and in the wet season near river mouths. The suggested depth is a rule of thumb that ignores target depth, frequency, seabed and noise.</p>
+  <p class="note">Monthly climatology: no tides, internal waves or river plumes. Unreliable near the coast and in the wet season near river mouths. A surface duct is flagged when sound speed rises with depth through the mixed layer; it says nothing about frequency or whether sound is actually trapped.</p>
   <p class="note">Data: NOAA World Ocean Atlas 2023 (Locarnini et al., NOAA Atlas NESDIS 89, doi.org/10.25923/54bh-1613; Reagan et al., Volume 2: Salinity), NOAA NCEI. Sound speed: Mackenzie (1981). Basemap: Esri, GEBCO, NOAA. Map library: Leaflet.</p>
 </aside>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -104,7 +101,7 @@ function compute(){
 
 function render(){
   const rows=compute();draw(rows);
-  if(!rows){["r1","r2","r3","r4","r5","r6","r7","r8"].forEach(r=>$(r).textContent="–");$("why").textContent="";$("tbl").innerHTML="";return;}
+  if(!rows){["r1","r2","r3","r4","r5","r6","r7"].forEach(r=>$(r).textContent="–");$("tbl").innerHTML="";return;}
   const min=rows.reduce((a,b)=>b.c<a.c?b:a),ref=(rows.find(r=>r.z>=10)||rows[0]).T,mld=rows.find(r=>r.T<ref-0.2);
   $("r1").textContent=rows[0].c.toFixed(1)+" m/s";
   $("r2").textContent=`${min.c.toFixed(1)} m/s at ${min.z} m`;
@@ -113,14 +110,7 @@ function render(){
   $("r5").textContent=cell?`${cell.lat.toFixed(2)}°, ${cell.lon.toFixed(2)}°`:"–";
   $("r6").textContent=adj?`${adj>0?"+":""}${adj.toFixed(2)} °C`:"none";
   const lay=mld?rows.filter(r=>r.z<=mld.z):[],ld0=lay.length?lay.reduce((a,b)=>b.c>a.c?b:a):null,ld=ld0&&ld0.z>0?ld0:null;
-  const last=rows[rows.length-1],axis=min.z>0&&min.z<last.z?min:null,g=$("goal").value;
-  $("r7").textContent=ld?`to ${ld.z} m`:"none";
-  let d=null,w="";
-  if(g==="axis"){if(axis){d=axis.z;w="Sound channel axis (minimum sound speed): sound bends back towards it, which favours long range.";}else w=`No channel axis in the data: sound speed is still falling at the deepest level (${last.z} m).`;}
-  else if(g==="duct"){if(ld){d=Math.round(ld.z/2);w=`Mid-way in the surface duct (layer depth ${ld.z} m), where sound is trapped near the surface.`;}else w="No surface duct: sound speed falls with depth from the surface, so little sound is trapped there.";}
-  else if(mld){d=Math.min(mld.z+10,last.z);w=`10 m below the mixed layer (${mld.z} m), under the surface layer's ducting and refraction.`;}
-  else w="Mixed layer is deeper than the data.";
-  $("r8").textContent=d==null?"n/a":d+" m";$("why").textContent=w;
+  $("r7").textContent=ld?`Yes, to ${ld.z} m`:"No";
   $("tbl").innerHTML="<tr><th>depth m</th><th>WOA T °C</th><th>WOA S</th><th>T used</th><th>c m/s</th></tr>"+rows.map(r=>`<tr><td>${r.z}</td><td>${r.Tr.toFixed(2)}</td><td>${r.Sr.toFixed(2)}</td><td>${r.T.toFixed(2)}</td><td>${r.c.toFixed(1)}</td></tr>`).join("");
 }
 
@@ -158,7 +148,7 @@ $("set").onchange=async()=>{const k=$("set").value,mt=await loadMeta(k);
   if(demo||!mt){$("msg").textContent="That period's data isn't in the repo yet. Run the workflow with dataset 'recent'.";$("set").value=ds;return;}
   ds=k;meta=mt;if(cur)pick(cur.lat,cur.lon);};
 
-["meas","goal"].forEach(id=>$(id).oninput=render);
+["meas"].forEach(id=>$(id).oninput=render);
 addEventListener("resize",render);
 
 $("csv").onclick=()=>{
