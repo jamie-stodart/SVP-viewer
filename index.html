@@ -34,11 +34,8 @@ table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:ta
   <div id="msg">Click the map to start.</div>
   <label>Month <select id="month"></select></label>
   <label>Data period <select id="set"><option value="all">1955–2022 average</option><option value="recent">2015–2022 (more recent)</option></select></label>
-  <label>Local time: <b id="hv">14:00</b> <input id="hour" type="range" min="0" max="23.5" step="0.5" value="14"></label>
-  <label>Daytime surface warming: <b id="av">0.8</b> °C <input id="amp" type="range" min="0" max="2" step="0.1" value="0.8"></label>
-  <label>Temperature offset: <b id="tv">0.0</b> °C <input id="toff" type="range" min="-5" max="5" step="0.1" value="0"></label>
-  <label>Salinity offset: <b id="sv">0.0</b> PSU <input id="soff" type="range" min="-2" max="2" step="0.1" value="0"></label>
-  <label>Measured water temp: <input id="meas" type="number" step="0.1" placeholder="°C"> <button id="fit">Set offset to match</button></label>
+  <label>Measured water temp (°C). The whole profile shifts to match it. <input id="meas" type="number" step="0.1" placeholder="e.g. 29.5"></label>
+  <label>Sonar goal <select id="goal"><option value="axis">Long range (sound channel axis)</option><option value="duct">Inside the surface duct</option><option value="below">Below the mixed layer</option></select></label>
   <canvas id="plot" role="img" aria-label="Sound speed against depth"></canvas>
   <dl>
     <dt>Surface sound speed</dt><dd id="r1">–</dd>
@@ -46,10 +43,15 @@ table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:ta
     <dt>Mixed layer depth (est.)</dt><dd id="r3">–</dd>
     <dt>Data surface T, S (raw)</dt><dd id="r4">–</dd>
     <dt>Grid cell centre</dt><dd id="r5">–</dd>
+    <dt>Adjustment from measured temp</dt><dd id="r6">–</dd>
+    <dt>Surface duct (layer depth)</dt><dd id="r7">–</dd>
+    <dt>Suggested sonar depth</dt><dd id="r8">–</dd>
   </dl>
+  <p class="note" id="why"></p>
   <details><summary>Data values at this point</summary><table id="tbl"></table></details>
   <button id="csv">Download CSV</button>
-  <p class="note">Monthly climatology: no tides, internal waves or river plumes. Warming is a heuristic, not data. Unreliable near the coast and in the wet season near river mouths.</p>
+  <p class="note">Monthly climatology: no tides, internal waves or river plumes. Unreliable near the coast and in the wet season near river mouths. The suggested depth is a rule of thumb that ignores target depth, frequency, seabed and noise.</p>
+  <p class="note">Data: NOAA World Ocean Atlas 2023 (Locarnini et al., NOAA Atlas NESDIS 89, doi.org/10.25923/54bh-1613; Reagan et al., Volume 2: Salinity), NOAA NCEI. Sound speed: Mackenzie (1981). Basemap: Esri, GEBCO, NOAA. Map library: Leaflet.</p>
 </aside>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -58,7 +60,7 @@ const $=id=>document.getElementById(id);
 MON.forEach((m,i)=>$("month").add(new Option(m,i+1)));
 $("month").value=new Date().getMonth()+1;
 
-let meta=null,demo=false,cur=null,prof=null,cell=null,ds="all";const cache={},metas={},dirs={all:"data/",recent:"data/recent/"};
+let meta=null,demo=false,cur=null,prof=null,cell=null,ds="all",adj=0;const cache={},metas={},dirs={all:"data/",recent:"data/recent/"};
 async function loadMeta(k){if(!(k in metas)){try{const r=await fetch(dirs[k]+"meta.json");if(!r.ok)throw 0;metas[k]=await r.json();}catch{metas[k]=null;}}return metas[k];}
 
 async function init(){
@@ -94,25 +96,31 @@ async function getProfile(lat,lon,m){
 // Mackenzie (1981); T degC, S PSU, D metres
 const mack=(T,S,D)=>1448.96+4.591*T-5.304e-2*T*T+2.374e-4*T**3+1.340*(S-35)+1.630e-2*D+1.675e-7*D*D-1.025e-2*T*(S-35)-7.139e-13*T*D**3;
 
-function diurnal(h){const d=Math.min(Math.abs(h-14.5),24-Math.abs(h-14.5));return Math.exp(-d*d/18);}
-
 function compute(){
   if(!prof)return null;
-  const h=+$("hour").value,a=+$("amp").value,to=+$("toff").value,so=+$("soff").value;
-  return prof.map(p=>{const T=p.T+to+a*diurnal(h)*Math.exp(-p.z/6),S=p.S+so;return{z:p.z,T,S,c:mack(T,S,p.z),Tr:p.T,Sr:p.S};});
+  const v=parseFloat($("meas").value);adj=isNaN(v)?0:v-prof[0].T;
+  return prof.map(p=>{const T=p.T+adj,S=p.S;return{z:p.z,T,S,c:mack(T,S,p.z),Tr:p.T,Sr:p.S};});
 }
 
 function render(){
-  $("hv").textContent=String(Math.floor($("hour").value)).padStart(2,"0")+":"+($("hour").value%1?"30":"00");
-  $("av").textContent=(+$("amp").value).toFixed(1);$("tv").textContent=(+$("toff").value).toFixed(1);$("sv").textContent=(+$("soff").value).toFixed(1);
   const rows=compute();draw(rows);
-  if(!rows){["r1","r2","r3","r4","r5"].forEach(r=>$(r).textContent="–");$("tbl").innerHTML="";return;}
+  if(!rows){["r1","r2","r3","r4","r5","r6","r7","r8"].forEach(r=>$(r).textContent="–");$("why").textContent="";$("tbl").innerHTML="";return;}
   const min=rows.reduce((a,b)=>b.c<a.c?b:a),ref=(rows.find(r=>r.z>=10)||rows[0]).T,mld=rows.find(r=>r.T<ref-0.2);
   $("r1").textContent=rows[0].c.toFixed(1)+" m/s";
   $("r2").textContent=`${min.c.toFixed(1)} m/s at ${min.z} m`;
   $("r3").textContent=mld?mld.z+" m":`> ${rows[rows.length-1].z} m`;
   $("r4").textContent=demo?"synthetic":`${rows[0].Tr.toFixed(2)} °C, ${rows[0].Sr.toFixed(2)}`;
   $("r5").textContent=cell?`${cell.lat.toFixed(2)}°, ${cell.lon.toFixed(2)}°`:"–";
+  $("r6").textContent=adj?`${adj>0?"+":""}${adj.toFixed(2)} °C`:"none";
+  const lay=mld?rows.filter(r=>r.z<=mld.z):[],ld0=lay.length?lay.reduce((a,b)=>b.c>a.c?b:a):null,ld=ld0&&ld0.z>0?ld0:null;
+  const last=rows[rows.length-1],axis=min.z>0&&min.z<last.z?min:null,g=$("goal").value;
+  $("r7").textContent=ld?`to ${ld.z} m`:"none";
+  let d=null,w="";
+  if(g==="axis"){if(axis){d=axis.z;w="Sound channel axis (minimum sound speed): sound bends back towards it, which favours long range.";}else w=`No channel axis in the data: sound speed is still falling at the deepest level (${last.z} m).`;}
+  else if(g==="duct"){if(ld){d=Math.round(ld.z/2);w=`Mid-way in the surface duct (layer depth ${ld.z} m), where sound is trapped near the surface.`;}else w="No surface duct: sound speed falls with depth from the surface, so little sound is trapped there.";}
+  else if(mld){d=Math.min(mld.z+10,last.z);w=`10 m below the mixed layer (${mld.z} m), under the surface layer's ducting and refraction.`;}
+  else w="Mixed layer is deeper than the data.";
+  $("r8").textContent=d==null?"n/a":d+" m";$("why").textContent=w;
   $("tbl").innerHTML="<tr><th>depth m</th><th>WOA T °C</th><th>WOA S</th><th>T used</th><th>c m/s</th></tr>"+rows.map(r=>`<tr><td>${r.z}</td><td>${r.Tr.toFixed(2)}</td><td>${r.Sr.toFixed(2)}</td><td>${r.T.toFixed(2)}</td><td>${r.c.toFixed(1)}</td></tr>`).join("");
 }
 
@@ -149,10 +157,8 @@ $("month").onchange=()=>cur&&pick(cur.lat,cur.lon);
 $("set").onchange=async()=>{const k=$("set").value,mt=await loadMeta(k);
   if(demo||!mt){$("msg").textContent="That period's data isn't in the repo yet. Run the workflow with dataset 'recent'.";$("set").value=ds;return;}
   ds=k;meta=mt;if(cur)pick(cur.lat,cur.lon);};
-$("fit").onclick=()=>{const rows=compute(),v=parseFloat($("meas").value);
-  if(!rows||isNaN(v)){$("msg").textContent="Pick a point and enter a measured temperature first.";return;}
-  const base=rows[0].T-(+$("toff").value);$("toff").value=Math.max(-5,Math.min(5,v-base)).toFixed(1);render();};
-["hour","amp","toff","soff"].forEach(id=>$(id).oninput=render);
+
+["meas","goal"].forEach(id=>$(id).oninput=render);
 addEventListener("resize",render);
 
 $("csv").onclick=()=>{
