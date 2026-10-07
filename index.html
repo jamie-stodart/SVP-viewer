@@ -1,58 +1,152 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SVP Viewer</title>
- 
-<link rel="stylesheet"
-href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
- 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
- 
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northern Australia SVP estimator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-html, body {
-height: 100%;
-margin: 0;
-}
- 
-#map {
-width: 100%;
-height: 100%;
-}
+:root{--bg:#0d1a22;--panel:#13242e;--ink:#d8e4e2;--dim:#8aa0a4;--line:#27404b;--acc:#f0b64a}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 Georgia,serif;background:var(--bg);color:var(--ink);display:grid;grid-template-columns:1fr 420px;height:100vh}
+#map{height:100%}
+aside{background:var(--panel);padding:16px 18px;overflow-y:auto;border-left:1px solid var(--line)}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{margin:0 0 12px;color:var(--dim);font-size:13px}
+label{display:block;font-size:13px;color:var(--dim);margin-top:10px}
+select,input[type=range]{width:100%}
+select{background:var(--bg);color:var(--ink);border:1px solid var(--line);padding:6px;font:inherit}
+canvas{width:100%;height:340px;margin-top:12px;background:var(--bg);border:1px solid var(--line)}
+dl{display:grid;grid-template-columns:1fr auto;gap:2px 10px;margin:12px 0;font-size:14px}
+dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+button{background:var(--acc);color:#1a1405;border:0;padding:7px 12px;font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#msg{font-size:13px;color:var(--acc);min-height:1.4em}
+.note{font-size:12px;color:var(--dim)}
+@media(max-width:800px){body{grid-template-columns:1fr;grid-template-rows:45vh auto;height:auto}}
 </style>
- 
 </head>
- 
 <body>
- 
-<div id="map"></div>
- 
+<div id="map" aria-label="Map: click to choose a location"></div>
+<aside>
+  <h1>Sound velocity profile</h1>
+  <p class="sub">Rough climatological estimate. Click the map to pick a point.</p>
+  <div id="msg">Click the map to start.</div>
+  <label>Month <select id="month"></select></label>
+  <label>Local time: <b id="hv">14:00</b> <input id="hour" type="range" min="0" max="23.5" step="0.5" value="14"></label>
+  <label>Daytime surface warming: <b id="av">0.8</b> °C <input id="amp" type="range" min="0" max="2" step="0.1" value="0.8"></label>
+  <label>Temperature offset: <b id="tv">0.0</b> °C <input id="toff" type="range" min="-2" max="2" step="0.1" value="0"></label>
+  <label>Salinity offset: <b id="sv">0.0</b> PSU <input id="soff" type="range" min="-2" max="2" step="0.1" value="0"></label>
+  <canvas id="plot" role="img" aria-label="Sound speed against depth"></canvas>
+  <dl>
+    <dt>Surface sound speed</dt><dd id="r1">–</dd>
+    <dt>Minimum sound speed</dt><dd id="r2">–</dd>
+    <dt>Mixed layer depth (est.)</dt><dd id="r3">–</dd>
+  </dl>
+  <button id="csv">Download CSV</button>
+  <p class="note">Monthly climatology: no tides, internal waves or river plumes. Warming is a heuristic, not data. Unreliable near the coast and in the wet season near river mouths.</p>
+</aside>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
- 
-const map = L.map('map').setView([-12.4,130.9],5);
- 
-L.tileLayer(
-'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-{
-attribution: '© OpenStreetMap'
+const MON=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const $=id=>document.getElementById(id);
+MON.forEach((m,i)=>$("month").add(new Option(m,i+1)));
+$("month").value=new Date().getMonth()+1;
+
+let meta=null,demo=false,cur=null,prof=null;const cache={};
+
+async function init(){
+  try{const r=await fetch("data/meta.json");if(!r.ok)throw 0;meta=await r.json();}
+  catch{demo=true;meta={lon0:105,lat0:-25,res:.5,nx:111,ny:41,depths:[0,5,10,20,30,50,75,100,125,150,200,250,300,400,500,600,800,1000]};
+    $("msg").textContent="Demo mode: data/ not found, so profiles are synthetic.";}
 }
-).addTo(map);
- 
-map.on('click', function(e){
- 
-L.popup()
-.setLatLng(e.latlng)
-.setContent(
-'Lat: '
-+ e.latlng.lat.toFixed(4)
-+ '<br>Lon: '
-+ e.latlng.lng.toFixed(4)
-)
-.openOn(map);
- 
-});
- 
+
+async function getMonth(m){
+  if(!cache[m]){const r=await fetch(`data/m${String(m).padStart(2,"0")}.bin`);cache[m]=new Int16Array(await r.arrayBuffer());}
+  return cache[m];
+}
+
+function synth(lat,m){ // placeholder so the UI works without data
+  const season=Math.cos((m-2)/12*2*Math.PI), sst=30.2-0.17*(Math.abs(lat)-5)+0.8*season*(lat<0?1:-1)*0.5;
+  return meta.depths.map(z=>({z,T:Math.max(4.5,sst-(sst-5)*(1-Math.exp(-z/(220+0*z)))*(z<110?z/110*0.5+0.5*(z/400):1)),S:34.6+0.6*Math.exp(-Math.pow((z-150)/120,2))-0.2*Math.exp(-z/40)}));
+}
+
+async function getProfile(lat,lon,m){
+  if(demo)return synth(lat,m);
+  const i=Math.round((lon-meta.lon0)/meta.res),j=Math.round((lat-meta.lat0)/meta.res);
+  if(i<0||j<0||i>=meta.nx||j>=meta.ny)return null;
+  const d=await getMonth(m),nz=meta.depths.length,base=(j*meta.nx+i)*nz,sOff=meta.nx*meta.ny*nz,out=[];
+  for(let k=0;k<nz;k++){
+    const t=d[base+k],s=d[sOff+base+k];
+    if(t===-32768||s===-32768)break; // seabed (or land)
+    out.push({z:meta.depths[k],T:t/100,S:s/1000});
+  }
+  return out.length?out:null;
+}
+
+// Mackenzie (1981); T degC, S PSU, D metres
+const mack=(T,S,D)=>1448.96+4.591*T-5.304e-2*T*T+2.374e-4*T**3+1.340*(S-35)+1.630e-2*D+1.675e-7*D*D-1.025e-2*T*(S-35)-7.139e-13*T*D**3;
+
+function diurnal(h){const d=Math.min(Math.abs(h-14.5),24-Math.abs(h-14.5));return Math.exp(-d*d/18);}
+
+function compute(){
+  if(!prof)return null;
+  const h=+$("hour").value,a=+$("amp").value,to=+$("toff").value,so=+$("soff").value;
+  return prof.map(p=>{const T=p.T+to+a*diurnal(h)*Math.exp(-p.z/6),S=p.S+so;return{z:p.z,T,S,c:mack(T,S,p.z)};});
+}
+
+function render(){
+  $("hv").textContent=String(Math.floor($("hour").value)).padStart(2,"0")+":"+($("hour").value%1?"30":"00");
+  $("av").textContent=(+$("amp").value).toFixed(1);$("tv").textContent=(+$("toff").value).toFixed(1);$("sv").textContent=(+$("soff").value).toFixed(1);
+  const rows=compute();draw(rows);
+  if(!rows){["r1","r2","r3"].forEach(r=>$(r).textContent="–");return;}
+  const min=rows.reduce((a,b)=>b.c<a.c?b:a),ref=(rows.find(r=>r.z>=10)||rows[0]).T,mld=rows.find(r=>r.T<ref-0.2);
+  $("r1").textContent=rows[0].c.toFixed(1)+" m/s";
+  $("r2").textContent=`${min.c.toFixed(1)} m/s at ${min.z} m`;
+  $("r3").textContent=mld?mld.z+" m":`> ${rows[rows.length-1].z} m`;
+}
+
+function draw(rows){
+  const cv=$("plot"),dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+  cv.width=W*dpr;cv.height=H*dpr;const g=cv.getContext("2d");g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  g.font="12px Georgia";g.fillStyle="#8aa0a4";
+  if(!rows){g.fillText("No ocean data at this point (land or off-grid).",16,H/2);return;}
+  const L=48,R=14,Tp=14,B=34,cs=rows.map(r=>r.c),lo=Math.floor(Math.min(...cs)-2),hi=Math.ceil(Math.max(...cs)+2),zmax=rows[rows.length-1].z||1;
+  const X=c=>L+(c-lo)/(hi-lo)*(W-L-R),Y=z=>Tp+z/zmax*(H-Tp-B);
+  g.strokeStyle="#27404b";g.textAlign="center";
+  for(let i=0;i<=4;i++){const c=lo+(hi-lo)*i/4;g.beginPath();g.moveTo(X(c),Tp);g.lineTo(X(c),H-B);g.stroke();g.fillText(c.toFixed(0),X(c),H-B+14);}
+  g.fillText("sound speed (m/s)",L+(W-L-R)/2,H-6);
+  g.textAlign="right";
+  for(let i=0;i<=4;i++){const z=zmax*i/4;g.beginPath();g.moveTo(L,Y(z));g.lineTo(W-R,Y(z));g.stroke();g.fillText(Math.round(z),L-6,Y(z)+4);}
+  g.save();g.translate(11,Tp+(H-Tp-B)/2);g.rotate(-Math.PI/2);g.textAlign="center";g.fillText("depth (m)",0,0);g.restore();
+  g.strokeStyle="#f0b64a";g.lineWidth=2;g.beginPath();
+  rows.forEach((r,i)=>i?g.lineTo(X(r.c),Y(r.z)):g.moveTo(X(r.c),Y(r.z)));g.stroke();
+}
+
+async function pick(lat,lon){
+  cur={lat,lon};
+  if(!demo)$("msg").textContent=`${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+  else $("msg").textContent=`Demo mode (synthetic). ${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+  try{prof=await getProfile(lat,lon,+$("month").value);}catch(e){prof=null;$("msg").textContent="Could not load data files.";}
+  render();
+}
+
+const map=L.map("map").setView([-12,133],5);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{subdomains:"abcd",attribution:"© OpenStreetMap contributors © CARTO",maxZoom:12}).addTo(map);
+let marker=null;
+map.on("click",e=>{if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);pick(e.latlng.lat,e.latlng.lng);});
+$("month").onchange=()=>cur&&pick(cur.lat,cur.lon);
+["hour","amp","toff","soff"].forEach(id=>$(id).oninput=render);
+addEventListener("resize",render);
+
+$("csv").onclick=()=>{
+  const rows=compute();if(!rows)return;
+  const t="depth_m,temp_C,salinity_PSU,sound_speed_mps\n"+rows.map(r=>[r.z,r.T.toFixed(3),r.S.toFixed(3),r.c.toFixed(2)].join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"text/csv"}));
+  a.download=`svp_${cur.lat.toFixed(2)}_${cur.lon.toFixed(2)}_m${$("month").value}.csv`;a.click();
+};
+
+init().then(render);
 </script>
- 
 </body>
 </html>
