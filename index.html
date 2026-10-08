@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Northern Australia SVP estimator</title>
+<title>Australian waters SVP estimator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root{--bg:#0d1a22;--panel:#13242e;--ink:#d8e4e2;--dim:#8aa0a4;--line:#27404b;--acc:#f0b64a}
@@ -141,7 +141,7 @@ async function pick(lat,lon){
   render();
 }
 
-const map=L.map("map").setView([-12,133],5);
+const map=L.map("map").setView([-26,134],4);
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",{attribution:"Tiles © Esri, GEBCO, NOAA, National Geographic, and others",maxNativeZoom:10,maxZoom:10}).addTo(map);
 let marker=null;
 map.on("click",e=>{if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);pick(e.latlng.lat,e.latlng.lng);});
