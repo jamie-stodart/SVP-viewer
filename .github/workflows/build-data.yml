@@ -6,8 +6,8 @@ on:
       dataset:
         description: "Which data to build"
         type: choice
-        options: [recent, all]
-        default: recent
+        options: [both, recent, all]
+        default: both
 
 permissions:
   contents: write      # lets the workflow commit data/ back to the repo
